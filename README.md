@@ -52,9 +52,11 @@ One Markdown file. Many possible renderings: slide deck, blog, resume, product p
 
 ### How to use
 
-**File → New Slides (`⌘⇧N`)** — Creates a `slides.md` template and opens it in the editor.
+**File → New Slides (`⌘⇧N`)** — Creates a `slides.md` tutorial template and opens it in the editor.
 
 **File → Open as Slides (`⌘⇧P`)** — Spins up a local server and opens your current `.md` file as a slide deck in the browser. If no file is open, it creates one first.
+
+**File → Export Slides...** — Export a shareable version. Without video: a single `.html` file with images inlined as base64 — your friend double-clicks to view. With video: a folder containing `index.html` plus the video files — zip and send.
 
 ### Slide format
 
@@ -95,7 +97,7 @@ Supported layouts: `cover` · `statement` · `section` · `video` · `thankyou`
 
 Optional: background image (`bg: cover.png`), video embed (`src: demo.mp4`), inline image preview (`preview: screenshot.png`).
 
-No image? The cover falls back to a clean dark gradient — it just works.
+No image? The cover falls back to a clean orange-on-white design — it just works.
 
 ## Download
 
@@ -178,7 +180,8 @@ ColaMD will evolve alongside the agent ecosystem:
 - v1.1 — Live file reload, file associations, drag & drop, themes
 - v1.2 — New icon
 - v1.3 — Agent activity indicator, Cmd+click links, rich text copy, smart line breaks, PDF/HTML export, theme persistence
-- v1.4 — Slides: Markdown as Database, HTML template rendering (current)
+- v1.4 — Slides: Markdown as Database, HTML template rendering
+- v1.5 — Export Slides: shareable single-file HTML with inlined images (current)
 - Future — More templates, bidirectional sync, multi-file watching
 
 ## License

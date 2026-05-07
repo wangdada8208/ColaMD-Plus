@@ -9,6 +9,10 @@ directories:
 files:
   - dist/**/*
 
+extraResources:
+  - from: resources/templates
+    to: templates
+
 npmArgs:
   - "--loglevel=error"
 
