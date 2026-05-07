@@ -46,7 +46,7 @@
       width: min(100vw - 36px, calc((100vh - 36px) * (16 / 9)));
       aspect-ratio: 16 / 9;
       border: 1px solid var(--gray-200); border-radius: 16px; overflow: hidden;
-      box-shadow: 0 8px 24px rgba(26,25,24,0.08), 0 4px 8px rgba(26,25,24,0.04);
+      box-shadow: 0 24px 64px rgba(26,25,24,0.22), 0 8px 24px rgba(26,25,24,0.12), 0 2px 6px rgba(26,25,24,0.08);
       background: linear-gradient(180deg, rgba(255,255,255,0.56), rgba(247,243,238,0.18));
       isolation: isolate;
     }
@@ -115,31 +115,30 @@
     .cover-slide .axis-bar { display: none; }
     .cover-slide .slide-main {
       width: 100%; height: 100%;
+      background: var(--paper);
       background-size: cover; background-position: center; background-repeat: no-repeat;
-      padding: 0; display: grid; grid-template-rows: 1fr auto;
-      place-items: center;
+      padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
     .cover-slide .slide-main header { display: none; }
     .cover-slide .slide-main .content {
       display: grid; place-items: center; gap: clamp(8px,1.2vw,18px);
       text-align: center; max-width: 100%; padding: 0 20px;
-      align-self: end; margin-bottom: clamp(40px,5vw,90px);
+      flex: 1; align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
     .cover-slide .slide-main .content h1 {
-      font-size: clamp(64px,7vw,130px); color: #fff; font-weight: 800;
-      text-shadow: 0 4px 32px rgba(0,0,0,0.5); letter-spacing: 0.02em;
+      font-size: clamp(64px,7vw,130px); color: var(--accent); font-weight: 900;
+      text-shadow: 0 4px 24px rgba(241,117,45,0.25); letter-spacing: 0.01em;
     }
     .cover-slide .slide-main .content .md-block {
-      font-size: clamp(22px,2.4vw,44px); color: rgba(255,255,255,0.88);
-      font-weight: 500; text-shadow: 0 2px 16px rgba(0,0,0,0.5);
+      font-size: clamp(22px,2.4vw,44px); color: var(--gray-600);
+      font-weight: 500; text-shadow: none;
     }
     .cover-slide .slide-main footer {
-      border-top: none; justify-content: center; padding-bottom: clamp(20px,2.5vw,40px);
+      border-top: 1px solid var(--gray-200); justify-content: center; padding-bottom: clamp(20px,2.5vw,40px);
     }
     .cover-slide .slide-main footer .chip { display: none; }
     .cover-slide .slide-main footer .page {
-      color: rgba(255,255,255,0.5); font-size: clamp(12px,1vw,18px);
-      text-shadow: 0 1px 8px rgba(0,0,0,0.4);
+      color: var(--gray-500); font-size: clamp(12px,1vw,18px);
     }
 
     .video-slide .content { align-content: center; justify-items: center; }
@@ -199,11 +198,11 @@
     .launch-sub { font-size: clamp(14px,1.2vw,20px); color: var(--gray-600); line-height: 1.4; font-weight: 500; }
 
     .slide-preview {
-      margin-top: 8px; width: clamp(180px,22vw,360px); aspect-ratio: 16/9;
+      margin-top: 8px; max-width: clamp(180px,22vw,360px);
       border-radius: 8px; overflow: hidden;
       box-shadow: 0 4px 16px rgba(0,0,0,0.12); border: 1px solid var(--gray-200);
     }
-    .slide-preview img { width: 100%; height: 100%; object-fit: cover; }
+    .slide-preview img { width: 100%; height: auto; display: block; }
 
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(12px); }
@@ -272,23 +271,16 @@
     }
 
     function parseSlides(body) {
-      return body.split(/\n---\n/).map(raw => {
+      // Strip multi-line HTML comments before splitting into slides
+      const stripped = body.replace(/<!--[\s\S]*?-->/g, '');
+      return stripped.split(/\n---\n/).map(raw => {
         const lines = raw.trim().split('\n');
         const slide = { type: 'section', title: '', blocks: [] };
 
-        // Check first line for directive comment
+        // Check first line for directive comment (single-line only, already stripped above)
         if (lines[0] && lines[0].trim().startsWith('<!--')) {
           Object.assign(slide, parseDirective(lines.shift()));
         }
-
-        // Check for inline preview comment on any line
-        lines.forEach((line, i) => {
-          if (line.trim().startsWith('<!--')) {
-            const d = parseDirective(line);
-            if (d.preview) slide.preview = d.preview;
-            lines[i] = '';
-          }
-        });
 
         lines.forEach(line => {
           if (line.startsWith('# ')) {
@@ -301,7 +293,6 @@
           }
         });
 
-        // Blank blocks between paragraphs — join consecutive non-empty lines
         slide.blocks = mergeBlocks(raw, slide);
 
         return slide;
@@ -309,20 +300,32 @@
     }
 
     // Re-parse blocks respecting blank-line paragraph breaks
+    // Blocks can be text strings or {type:'image', src, alt} objects
     function mergeBlocks(raw, slide) {
-      const lines = raw.trim().split('\n');
+      const stripped = raw.replace(/<!--[\s\S]*?-->/g, '');
+      const lines = stripped.trim().split('\n');
       const blocks = [];
       let current = [];
 
+      function flushText() {
+        if (current.length) { blocks.push(current.join('\n')); current = []; }
+      }
+
       lines.forEach(line => {
-        if (line.startsWith('#') || line.startsWith('<!--')) return;
+        if (line.startsWith('#')) return;
+        const imgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+        if (imgMatch) {
+          flushText();
+          blocks.push({ type: 'image', alt: imgMatch[1], src: imgMatch[2] });
+          return;
+        }
         if (line.trim() === '') {
-          if (current.length) { blocks.push(current.join('\n')); current = []; }
+          flushText();
         } else {
           current.push(line.trim());
         }
       });
-      if (current.length) blocks.push(current.join('\n'));
+      flushText();
       return blocks;
     }
 
@@ -358,9 +361,7 @@
 
         if (item.type === 'cover') {
           if (item.bg) {
-            main.style.backgroundImage = `url('${item.bg}')`;
-          } else {
-            main.style.background = 'linear-gradient(135deg, #1A1918 0%, #3F3E3D 60%, #57534E 100%)';
+            main.style.background = `linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.52)), url('${item.bg}') center/cover no-repeat`;
           }
         }
 
@@ -387,10 +388,20 @@
         }
 
         item.blocks.forEach(block => {
-          const p = document.createElement('p');
-          p.className = 'md-block';
-          p.textContent = block;
-          content.appendChild(p);
+          if (block && typeof block === 'object' && block.type === 'image') {
+            const wrap = document.createElement('div');
+            wrap.className = 'slide-preview';
+            const img = document.createElement('img');
+            img.src = block.src;
+            if (block.alt) img.alt = block.alt;
+            wrap.appendChild(img);
+            content.appendChild(wrap);
+          } else {
+            const p = document.createElement('p');
+            p.className = 'md-block';
+            p.textContent = block;
+            content.appendChild(p);
+          }
         });
 
         if (item.src) {

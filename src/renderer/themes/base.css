@@ -32,6 +32,34 @@ html, body {
   transition: background 0.3s ease, opacity 0.3s ease;
 }
 
+#slides-btn {
+  position: absolute;
+  top: 14px;
+  right: 32px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s, color 0.15s;
+}
+
+#slides-btn:hover {
+  background: var(--accent-soft, rgba(241,117,45,0.12));
+  color: #F1752D;
+}
+
+#slides-btn.visible {
+  display: flex;
+}
+
 #agent-dot.active {
   background: #e8913a;
   opacity: 1;
@@ -53,6 +81,31 @@ html, body {
   height: calc(100vh - 52px);
   overflow-y: auto;
   padding: 0 40px 40px;
+}
+
+#source-editor {
+  display: none;
+  height: calc(100vh - 52px);
+  width: 100%;
+  padding: 40px;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  resize: none;
+  background: var(--bg-color);
+  color: var(--text-color);
+  font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  tab-size: 2;
+}
+
+#source-editor.visible {
+  display: block;
+}
+
+#editor.hidden {
+  display: none;
 }
 
 #editor .ProseMirror {

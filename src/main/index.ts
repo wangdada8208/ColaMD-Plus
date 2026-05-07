@@ -166,10 +166,19 @@ function watchFile(win: BrowserWindow, state: WindowState): void {
     state.debounceTimer = setTimeout(() => {
       readFile(filePath, 'utf-8')
         .then((data) => {
-          if (!win.isDestroyed()) win.webContents.send('file-changed', data)
+          if (!win.isDestroyed()) win.webContents.send('file-changed', resolveImagePaths(data, filePath))
         })
         .catch(() => {})
     }, 100)
+  })
+}
+
+// Rewrite relative image paths in markdown to absolute file:// URLs
+function resolveImagePaths(content: string, filePath: string): string {
+  const dir = dirname(filePath)
+  return content.replace(/!\[([^\]]*)\]\((?!https?:\/\/|file:\/\/|data:)([^)]+)\)/g, (_match, alt, src) => {
+    const abs = join(dir, src)
+    return `![${alt}](file://${abs})`
   })
 }
 
@@ -180,7 +189,7 @@ function loadFileInWindow(win: BrowserWindow, filePath: string): void {
       state.filePath = filePath
       watchFile(win, state)
       updateTitle(win)
-      win.webContents.send('file-opened', { path: filePath, content: data })
+      win.webContents.send('file-opened', { path: filePath, content: resolveImagePaths(data, filePath) })
     })
     .catch(() => {})
 }
@@ -319,6 +328,17 @@ ipcMain.handle('save-file', async (event, content: string) => {
     })
     if (result.canceled || !result.filePath) return false
     state.filePath = result.filePath
+    // Copy slides assets alongside the file if this looks like a slides file
+    if (content.includes('kicker:') || content.includes('chip:')) {
+      const destDir = dirname(state.filePath)
+      try {
+        const files = await readdir(slidesTemplateDir)
+        await Promise.all(files.filter(f => f !== 'slides-template.md').map(async (f) => {
+          const dest = join(destDir, f)
+          if (!existsSync(dest)) await copyFile(join(slidesTemplateDir, f), dest)
+        }))
+      } catch { /* best effort */ }
+    }
   }
   return saveToPath(win, state.filePath, content)
 })
@@ -433,20 +453,15 @@ function getOrCreateSlidesServer(dir: string): Promise<number> {
   })
 }
 
-// New Slides: copy template md to user-chosen location, open it
+// New Slides: load template into editor without saving first (⌘S saves later)
+// Also copy assets (template.html, icon.png) to the save directory when user saves
 ipcMain.handle('new-slides', async (event) => {
   const win = getWinFromEvent(event)
   if (!win) return null
-  const result = await dialog.showSaveDialog(win, {
-    title: 'Create New Slides',
-    defaultPath: 'slides.md',
-    filters: [{ name: 'Markdown', extensions: ['md'] }]
-  })
-  if (result.canceled || !result.filePath) return null
   try {
-    await copyFile(join(slidesTemplateDir, 'slides-template.md'), result.filePath)
-    loadFileInWindow(win, result.filePath)
-    return result.filePath
+    const content = await readFile(join(slidesTemplateDir, 'slides-template.md'), 'utf-8')
+    win.webContents.send('new-slides-content', content)
+    return true
   } catch {
     return null
   }
@@ -454,7 +469,7 @@ ipcMain.handle('new-slides', async (event) => {
 
 // Open as Slides: serve the directory containing the current .md file
 // If no file is open, first create a new slides file (same as New Slides)
-ipcMain.handle('open-as-slides', async (event) => {
+ipcMain.handle('open-as-slides', async (event, content?: string) => {
   const win = getWinFromEvent(event)
   if (!win) return false
   const state = getState(win)
@@ -476,17 +491,22 @@ ipcMain.handle('open-as-slides', async (event) => {
     }
   }
 
+  // Auto-save current content to disk before opening browser
+  if (content !== undefined && state.filePath) {
+    try {
+      await writeFile(state.filePath, content, 'utf-8')
+    } catch { /* best effort */ }
+  }
+
   const dir = dirname(state.filePath)
   const mdName = basename(state.filePath)
 
-  // Copy template.html into the same directory if not already there
+  // Always overwrite template.html so updates take effect
   const templateDest = join(dir, 'template.html')
-  if (!existsSync(templateDest)) {
-    try {
-      await copyFile(join(slidesTemplateDir, 'template.html'), templateDest)
-    } catch {
-      return false
-    }
+  try {
+    await copyFile(join(slidesTemplateDir, 'template.html'), templateDest)
+  } catch {
+    return false
   }
 
   // Rename slides.md reference in template to match actual filename
@@ -506,6 +526,94 @@ ipcMain.handle('open-as-slides', async (event) => {
   } catch {
     return false
   }
+})
+
+// Export Slides: inline images as base64, copy videos alongside, produce shareable output
+ipcMain.handle('export-slides', async (event, content: string) => {
+  const win = getWinFromEvent(event)
+  if (!win) return false
+  const state = getState(win)
+  if (!state.filePath) return false
+
+  const srcDir = dirname(state.filePath)
+
+  // Detect if content references any video files
+  const videoRefs = [...content.matchAll(/<!--\s*type:\s*video[^>]*src:\s*([^\s,>]+)/g)]
+    .map(m => m[1].trim())
+    .filter(Boolean)
+  const hasVideo = videoRefs.length > 0
+
+  // Choose export destination
+  let destDir: string
+  let destHtml: string
+
+  if (hasVideo) {
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Export Slides Folder',
+      defaultPath: join(srcDir, 'slides-export'),
+      buttonLabel: 'Export'
+    })
+    if (result.canceled || !result.filePath) return false
+    destDir = result.filePath
+    destHtml = join(destDir, 'index.html')
+    await mkdir(destDir, { recursive: true })
+  } else {
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Export Slides',
+      defaultPath: join(srcDir, 'slides.html'),
+      filters: [{ name: 'HTML', extensions: ['html'] }]
+    })
+    if (result.canceled || !result.filePath) return false
+    destDir = dirname(result.filePath)
+    destHtml = result.filePath
+  }
+
+  // Read template and inline the markdown content
+  let html = await readFile(join(srcDir, 'template.html'), 'utf-8')
+
+  // Replace fetch('slides.md') with inline content
+  const escaped = content.replace(/`/g, '\\`').replace(/\$/g, '\\$')
+  html = html.replace(
+    /fetch\('[^']+'\)\s*\n?\s*\.then\(r => r\.text\(\)\)/,
+    `Promise.resolve(\`${escaped}\`)`
+  )
+
+  // Inline images as base64
+  const imgMatches = [...content.matchAll(/!\[[^\]]*\]\((?!https?:\/\/|data:)([^)]+)\)/g)]
+  const inlinedImages = new Map<string, string>()
+  for (const m of imgMatches) {
+    const imgPath = m[1].trim()
+    if (inlinedImages.has(imgPath)) continue
+    try {
+      const abs = join(srcDir, imgPath)
+      const buf = await readFile(abs)
+      const ext = extname(imgPath).slice(1).toLowerCase()
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+        : ext === 'png' ? 'image/png'
+        : ext === 'gif' ? 'image/gif'
+        : ext === 'webp' ? 'image/webp'
+        : ext === 'svg' ? 'image/svg+xml'
+        : 'image/png'
+      inlinedImages.set(imgPath, `data:${mime};base64,${buf.toString('base64')}`)
+    } catch { /* skip missing images */ }
+  }
+  for (const [src, dataUrl] of inlinedImages) {
+    html = html.replaceAll(`src="${src}"`, `src="${dataUrl}"`)
+    html = html.replaceAll(`src='${src}'`, `src='${dataUrl}'`)
+  }
+
+  // Copy video files alongside if needed
+  if (hasVideo) {
+    for (const videoSrc of videoRefs) {
+      try {
+        await copyFile(join(srcDir, videoSrc), join(destDir, videoSrc))
+      } catch { /* skip missing videos */ }
+    }
+  }
+
+  await writeFile(destHtml, html, 'utf-8')
+  shell.showItemInFolder(destHtml)
+  return true
 })
 
 ipcMain.handle('load-custom-theme', async (event) => {
@@ -634,6 +742,10 @@ function buildMenu(): void {
         {
           label: 'Export HTML...',
           click: () => sendToFocused('menu-export-html')
+        },
+        {
+          label: 'Export Slides...',
+          click: () => sendToFocused('menu-export-slides')
         },
         {
           label: 'Open as Slides',

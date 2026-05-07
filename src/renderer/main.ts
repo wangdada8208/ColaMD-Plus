@@ -2,12 +2,50 @@ import { createEditor, getMarkdown, getHTML, setMarkdown } from './editor/editor
 import { applyTheme, loadSavedTheme } from './themes/theme-manager'
 import './themes/base.css'
 
+function isSlidesContent(content: string): boolean {
+  return /^---\s*\n[\s\S]*?(kicker|chip):/m.test(content)
+}
+
+let sourceModeActive = false
+const editorEl = () => document.getElementById('editor') as HTMLElement
+const sourceEl = () => document.getElementById('source-editor') as HTMLTextAreaElement
+const slidesBtnEl = () => document.getElementById('slides-btn') as HTMLButtonElement
+
+function enterSourceMode(content: string): void {
+  sourceModeActive = true
+  editorEl().classList.add('hidden')
+  const ta = sourceEl()
+  ta.classList.add('visible')
+  ta.value = content
+  slidesBtnEl().classList.add('visible')
+}
+
+function exitSourceMode(): void {
+  sourceModeActive = false
+  editorEl().classList.remove('hidden')
+  sourceEl().classList.remove('visible')
+  slidesBtnEl().classList.remove('visible')
+}
+
+function setContent(content: string): void {
+  if (isSlidesContent(content)) {
+    enterSourceMode(content)
+  } else {
+    exitSourceMode()
+    setMarkdown(content)
+  }
+}
+
+function getContent(): string {
+  if (sourceModeActive) return sourceEl().value
+  return getMarkdown()
+}
+
 async function init(): Promise<void> {
   const api = window.electronAPI
   const savedTheme = loadSavedTheme()
   applyTheme(savedTheme)
 
-  // Restore custom theme CSS from disk
   if (savedTheme.startsWith('custom:')) {
     const fileName = savedTheme.slice(7)
     const css = await api.loadThemeCSS(fileName)
@@ -16,15 +54,19 @@ async function init(): Promise<void> {
 
   await createEditor('editor')
 
+  // Slides button — open as slides
+  slidesBtnEl().addEventListener('click', () => api.openAsSlides(getContent()))
+
   api.onMenuOpen(async () => {
     const result = await api.openFile()
-    if (result) setMarkdown(result.content)
+    if (result) setContent(result.content)
   })
 
-  api.onMenuSave(() => api.saveFile(getMarkdown()))
-  api.onMenuSaveAs(() => api.saveFileAs(getMarkdown()))
+  api.onMenuSave(() => api.saveFile(getContent()))
+  api.onMenuSaveAs(() => api.saveFileAs(getContent()))
   api.onMenuExportPDF(() => api.exportPDF())
-  api.onMenuExportHTML(() => {    const s = getComputedStyle(document.body)
+  api.onMenuExportHTML(() => {
+    const s = getComputedStyle(document.body)
     const v = (name: string) => s.getPropertyValue(name).trim()
     const bgColor = v('--bg-color')
     const textColor = v('--text-color')
@@ -39,7 +81,6 @@ async function init(): Promise<void> {
     const tableHeaderBg = v('--table-header-bg')
     const selectionBg = v('--selection-bg')
 
-    // Get computed styles from actual editor elements
     const editor = document.querySelector('#editor .ProseMirror')
     const fontFamily = editor ? getComputedStyle(editor).fontFamily : '-apple-system,BlinkMacSystemFont,sans-serif'
 
@@ -73,9 +114,16 @@ img{max-width:100%}
 </head><body>${getHTML()}</body></html>`
     api.exportHTML(html)
   })
-  api.onNewFile(() => setMarkdown(''))
-  api.onFileOpened((data) => setMarkdown(data.content))
-  api.onFileChanged((content) => setMarkdown(content))
+
+  api.onNewFile(() => { exitSourceMode(); setMarkdown('') })
+  api.onFileOpened((data) => setContent(data.content))
+  api.onFileChanged((content) => {
+    if (sourceModeActive) {
+      sourceEl().value = content
+    } else {
+      setMarkdown(content)
+    }
+  })
   api.onSetTheme((theme) => applyTheme(theme))
   api.onSetCustomCSS((css) => {
     const theme = loadSavedTheme()
@@ -86,8 +134,16 @@ img{max-width:100%}
     await api.newSlides()
   })
 
+  api.onNewSlidesContent((content) => {
+    enterSourceMode(content)
+  })
+
   api.onMenuOpenAsSlides(async () => {
-    await api.openAsSlides()
+    await api.openAsSlides(getContent())
+  })
+
+  api.onMenuExportSlides(async () => {
+    await api.exportSlides(getContent())
   })
 
   api.onMenuImportTheme(async () => {
@@ -100,7 +156,6 @@ img{max-width:100%}
     if (agentDot) agentDot.className = state === 'idle' ? '' : state
   })
 
-  // Handle drag-and-drop of text files
   document.addEventListener('dragover', (e) => e.preventDefault())
   document.addEventListener('drop', async (e) => {
     e.preventDefault()
@@ -109,7 +164,7 @@ img{max-width:100%}
     const filePath = api.getPathForFile(file)
     if (!filePath) return
     const result = await api.openFilePath(filePath)
-    if (result) setMarkdown(result.content)
+    if (result) setContent(result.content)
   })
 }
 

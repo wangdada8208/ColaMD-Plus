@@ -56,10 +56,7 @@ function enhanceClipboard(e: ClipboardEvent): void {
   e.clipboardData?.setData('text/html', doc.body.innerHTML)
 }
 
-const defaultContent = `# Welcome to ColaMD
-
-Start typing here...
-`
+const defaultContent = `# Welcome to ColaMD\n\nStart typing here...\n`
 
 export async function createEditor(
   rootId: string,
