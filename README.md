@@ -116,13 +116,7 @@ No image? The cover falls back to a clean orange-on-white design — it just wor
 
 ## Download
 
-> Check [Releases](https://github.com/marswaveai/colamd/releases) for the latest builds.
-
-| Platform | Format |
-|----------|--------|
-| macOS    | `.dmg` |
-| Windows  | `.exe` |
-| Linux    | `.AppImage` / `.deb` |
+> [⬇ Download latest .dmg](https://github.com/wangdada8208/ColaMD-Plus/releases/latest) — Apple Silicon (arm64), macOS 14+
 
 ## How It Works
 

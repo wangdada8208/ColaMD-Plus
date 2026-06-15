@@ -116,13 +116,7 @@ page: YOUR NAME
 
 ## 下载
 
-> 查看 [Releases](https://github.com/marswaveai/colamd/releases) 获取最新构建。
-
-| 平台 | 格式 |
-|------|------|
-| macOS | `.dmg` |
-| Windows | `.exe` |
-| Linux | `.AppImage` / `.deb` |
+> [⬇ 下载最新 .dmg](https://github.com/wangdada8208/ColaMD-Plus/releases/latest) — Apple Silicon (arm64)，macOS 14+
 
 ## 工作原理
 
