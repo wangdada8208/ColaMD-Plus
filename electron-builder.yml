@@ -1,6 +1,6 @@
-appId: ai.marswave.colamd
-productName: ColaMD
-copyright: Copyright © 2024-2026 marswave.ai
+appId: com.wangdada8208.colamd-plus
+productName: ColaMD-Plus
+copyright: Copyright © 2026 wangdada8208. Based on ColaMD (c) 2024-2026 marswave.ai
 
 directories:
   output: release

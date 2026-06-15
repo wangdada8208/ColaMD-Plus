@@ -1,17 +1,16 @@
 {
-  "name": "colamd",
-  "version": "1.5.0",
-  "description": "The Agent Native Markdown Editor",
+  "name": "colamd-plus",
+  "version": "1.0.0",
+  "description": "ColaMD enhancement — image paste auto-save, gallery, and more",
   "main": "dist/main/index.js",
   "author": {
-    "name": "marswave.ai",
-    "email": "hello@marswave.ai"
+    "name": "wangdada8208"
   },
   "license": "MIT",
-  "homepage": "https://github.com/marswaveai/colamd",
+  "homepage": "https://github.com/wangdada8208/ColaMD-Plus",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marswaveai/colamd.git"
+    "url": "https://github.com/wangdada8208/ColaMD-Plus.git"
   },
   "scripts": {
     "dev": "electron-vite dev",
