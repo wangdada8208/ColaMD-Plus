@@ -1,13 +1,28 @@
-# ColaMD
+# ColaMD-Plus
 
-**Markdown as Database. The Agent Native editor and template rendering platform.**
+**基于 [ColaMD](https://github.com/marswaveai/colamd) 的增强版 — 增加了图片管理功能。**
 
-Real-time collaboration between humans and AI agents — see your agent's changes as they happen. Turn any Markdown file into a slide deck, blog post, resume, or product page.
+在保留原版所有功能的基础上，新增图片粘贴自动保存、图片画廊、关闭前保存提醒等功能。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub release](https://img.shields.io/github/release/marswaveai/colamd.svg)](https://github.com/marswaveai/colamd/releases)
 
-[Download](#download) | [Why ColaMD](#why-colamd) | [Features](#features) | [Slides](#slides--markdown-as-database) | [Development](#development) | [中文](README_CN.md)
+[Download](#download) | [New Features](#new-features) | [Why ColaMD](#why-colamd) | [Development](#development) | [中文](README_CN.md)
+
+---
+
+## New Features
+
+### 📸 Image Paste & Auto-Save
+Paste images (screenshots, etc.) directly into the editor — they're automatically saved to a `{filename}-assets/` folder alongside your `.md` file. Drag-and-drop from Finder also supported.
+
+### 🖼️ Image Gallery (⌘I)
+Press `Cmd+I` to open a floating gallery panel showing all images referenced in the current document. Browse thumbnails, search by filename, click to jump to the image reference in the editor, or right-click to reveal in Finder.
+
+### 🗑️ Orphan Cleanup
+When you delete an image reference from the markdown and save, the corresponding file in the assets folder is automatically removed. No stale files left behind.
+
+### 💾 Save-on-Close Prompt
+If you have unsaved changes when closing a window or quitting (`Cmd+Q`), ColaMD-Plus will ask: Save, Don't Save, or Cancel.
 
 ---
 
@@ -186,8 +201,11 @@ ColaMD will evolve alongside the agent ecosystem:
 
 ## License
 
-[MIT](LICENSE) — Free forever.
+[MIT](LICENSE)
+
+Original copyright (c) 2026 marswave.ai  
+Modifications copyright (c) 2026
 
 ---
 
-Built by [marswave.ai](https://marswave.ai) for the agent-native future.
+Built upon [ColaMD](https://github.com/marswaveai/colamd) by marswave.ai.

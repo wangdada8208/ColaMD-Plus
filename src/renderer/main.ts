@@ -1,4 +1,4 @@
-import { createEditor, getMarkdown, getHTML, setMarkdown } from './editor/editor'
+import { createEditor, getMarkdown, getHTML, setMarkdown, insertImageAtCursor, findImageInDoc } from './editor/editor'
 import { applyTheme, loadSavedTheme } from './themes/theme-manager'
 import './themes/base.css'
 
@@ -7,6 +7,14 @@ function isSlidesContent(content: string): boolean {
 }
 
 let sourceModeActive = false
+let galleryVisible = false
+let currentFilePath: string | null = null
+let needsSave = false
+let galleryImages: Array<{ alt: string; src: string; absPath: string; exists: boolean; fileName: string }> = []
+
+// Maps data: URLs → relative paths for pasted images that need file: conversion
+const pendingImageMap = new Map<string, string>()
+
 const editorEl = () => document.getElementById('editor') as HTMLElement
 const sourceEl = () => document.getElementById('source-editor') as HTMLTextAreaElement
 const slidesBtnEl = () => document.getElementById('slides-btn') as HTMLButtonElement
@@ -41,6 +49,149 @@ function getContent(): string {
   return getMarkdown()
 }
 
+// Convert data: URLs and file:// paths back to relative paths for saving
+async function processContentForSave(content: string): Promise<string> {
+  if (!currentFilePath) return content
+
+  const fileDir = dirname(currentFilePath)
+
+  // Process each pending image (data URL → file on disk → relative path)
+  for (const [dataUrl, savedPath] of pendingImageMap) {
+    if (savedPath) {
+      // Already saved — just replace data URL with relative path
+      content = content.replaceAll(dataUrl, savedPath)
+    } else {
+      // Deferred save: save the image to assets/ now
+      const base64 = dataUrl.split(',')[1]
+      const now = new Date()
+      const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
+      const ext = dataUrl.startsWith('data:image/png') ? 'png' : dataUrl.startsWith('data:image/jpeg') ? 'jpg' : dataUrl.startsWith('data:image/webp') ? 'webp' : dataUrl.startsWith('data:image/gif') ? 'gif' : 'png'
+      const fileName = `${mdBasename()}-image-${ts}.${ext}`
+      try {
+        const relativePath = await window.electronAPI.saveImageFile({ base64Data: base64, fileName, fileDir, mdName: mdBasename() + '-assets' })
+        pendingImageMap.set(dataUrl, relativePath)
+        content = content.replaceAll(dataUrl, relativePath)
+      } catch {
+        // Can't save — leave as data URL (not ideal but won't lose data)
+      }
+    }
+  }
+
+  // Convert ![](file:///abs/path/assets/xxx.png) back to ![](assets/xxx.png)
+  content = content.replace(
+    /!\[([^\]]*)\]\(file:\/\/([^)]+)\)/g,
+    (_match, alt, absPath: string) => {
+      const cleanPath = absPath.replace(/^\//, '')
+      const dir = fileDir.replace(/^\//, '')
+      if (cleanPath.startsWith(dir)) {
+        const rel = cleanPath.slice(dir.length).replace(/^\//, '')
+        return `![${alt}](${rel})`
+      }
+      return _match
+    }
+  )
+
+  return content
+}
+
+// ─── Image Gallery ────────────────────────────────────────────────
+
+function toggleGallery(): void {
+  galleryVisible = !galleryVisible
+  const el = document.getElementById('image-gallery')
+  if (!el) return
+  el.classList.toggle('hidden', !galleryVisible)
+  if (galleryVisible && currentFilePath) {
+    loadGalleryImages()
+    const searchInput = document.getElementById('gallery-search') as HTMLInputElement
+    if (searchInput) { searchInput.value = ''; searchInput.focus() }
+  }
+}
+
+async function loadGalleryImages(): Promise<void> {
+  if (!currentFilePath) return
+  try {
+    const images = await window.electronAPI.scanDocumentImages(currentFilePath)
+    galleryImages = images
+    renderGallery(images)
+  } catch (err) {
+    console.error('Failed to scan images:', err)
+  }
+}
+
+function renderGallery(images: Array<{ alt: string; src: string; absPath: string; exists: boolean; fileName: string }>): void {
+  const grid = document.getElementById('gallery-grid')
+  const empty = document.getElementById('gallery-empty')
+  if (!grid || !empty) return
+
+  if (images.length === 0) {
+    grid.innerHTML = ''
+    empty.classList.remove('hidden')
+    return
+  }
+  empty.classList.add('hidden')
+
+  grid.innerHTML = images.map((img, idx) => `
+    <div class="gallery-item" data-index="${idx}">
+      <img src="${img.exists ? `file://${img.absPath}` : ''}" alt="${escapeHtml(img.alt)}" loading="lazy"
+           onerror="this.style.display='none'">
+      <div class="gallery-info">
+        <div class="gallery-filename">${escapeHtml(img.fileName)}</div>
+        <div class="gallery-path">${escapeHtml(img.src)}</div>
+        ${img.exists ? '' : '<div class="gallery-missing">⚠ File not found</div>'}
+      </div>
+    </div>
+  `).join('')
+
+  // Click to jump to image in editor
+  grid.querySelectorAll('.gallery-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const index = parseInt((item as HTMLElement).dataset.index || '0')
+      const img = galleryImages[index]
+      if (img) {
+        findImageInDoc(img.src)
+        toggleGallery()
+      }
+    })
+  })
+
+  // Right-click to reveal in Finder
+  grid.querySelectorAll('.gallery-item').forEach((item) => {
+    item.addEventListener('contextmenu', async (e) => {
+      e.preventDefault()
+      const index = parseInt((item as HTMLElement).dataset.index || '0')
+      const img = galleryImages[index]
+      if (img?.exists && currentFilePath) {
+        const absPath = await window.electronAPI.resolveImagePath(img.src, dirname(currentFilePath))
+        window.electronAPI.revealInFinder(absPath)
+      }
+    })
+  })
+}
+
+function filterGallery(query: string): void {
+  const lower = query.toLowerCase()
+  const filtered = galleryImages.filter(img =>
+    img.fileName.toLowerCase().includes(lower) || img.src.toLowerCase().includes(lower)
+  )
+  renderGallery(filtered)
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function dirname(p: string): string {
+  const i = p.lastIndexOf('/')
+  return i >= 0 ? p.substring(0, i) : '.'
+}
+
+function mdBasename(): string {
+  if (!currentFilePath) return 'image'
+  const name = currentFilePath.split('/').pop() || 'image'
+  return name.replace(/\.[^.]+$/, '')
+}
+
 async function init(): Promise<void> {
   const api = window.electronAPI
   const savedTheme = loadSavedTheme()
@@ -52,18 +203,61 @@ async function init(): Promise<void> {
     if (css) applyTheme(savedTheme, css)
   }
 
-  await createEditor('editor')
+  await createEditor('editor', () => {
+    if (!needsSave) {
+      needsSave = true
+      api.setDirty(true)
+    }
+  })
 
   // Slides button — open as slides
   slidesBtnEl().addEventListener('click', () => api.openAsSlides(getContent()))
 
   api.onMenuOpen(async () => {
     const result = await api.openFile()
-    if (result) setContent(result.content)
+    if (result) {
+      currentFilePath = result.path
+      setContent(result.content)
+      needsSave = false; api.setDirty(false)
+    }
   })
 
-  api.onMenuSave(() => api.saveFile(getContent()))
-  api.onMenuSaveAs(() => api.saveFileAs(getContent()))
+  api.onMenuSave(async () => {
+    // For untitled docs: save first to establish a file path
+    if (!currentFilePath) {
+      const first = await api.saveFile(getContent())
+      if (!first) return
+      const p = await api.getCurrentFilePath()
+      if (!p) return
+      currentFilePath = p
+    }
+    // Process deferred images and save clean markdown
+    const content = await processContentForSave(getContent())
+    const saved = await api.saveFile(content)
+    if (saved) {
+      const p = await api.getCurrentFilePath()
+      if (p) currentFilePath = p
+      needsSave = false
+      api.setDirty(false)
+      // Clean up unreferenced images from the assets folder
+      if (currentFilePath) {
+        api.cleanupOrphanImages(content, dirname(currentFilePath), mdBasename() + '-assets')
+      }
+    }
+  })
+  api.onMenuSaveAs(async () => {
+    const content = await processContentForSave(getContent())
+    const saved = await api.saveFileAs(content)
+    if (saved) {
+      const p = await api.getCurrentFilePath()
+      if (p) currentFilePath = p
+      needsSave = false
+      api.setDirty(false)
+      if (currentFilePath) {
+        api.cleanupOrphanImages(content, dirname(currentFilePath), mdBasename() + '-assets')
+      }
+    }
+  })
   api.onMenuExportPDF(() => api.exportPDF())
   api.onMenuExportHTML(() => {
     const s = getComputedStyle(document.body)
@@ -115,8 +309,15 @@ img{max-width:100%}
     api.exportHTML(html)
   })
 
-  api.onNewFile(() => { exitSourceMode(); setMarkdown('') })
-  api.onFileOpened((data) => setContent(data.content))
+  api.onNewFile(() => {
+    exitSourceMode(); setMarkdown(''); currentFilePath = null
+    needsSave = false; api.setDirty(false)
+  })
+  api.onFileOpened((data) => {
+    currentFilePath = data.path
+    setContent(data.content)
+    needsSave = false; api.setDirty(false)
+  })
   api.onFileChanged((content) => {
     if (sourceModeActive) {
       sourceEl().value = content
@@ -156,15 +357,142 @@ img{max-width:100%}
     if (agentDot) agentDot.className = state === 'idle' ? '' : state
   })
 
+  // ─── Close-with-save handling ───
+
+  api.onTriggerSave(async () => {
+    // Main process asked us to save before closing
+    if (!currentFilePath) {
+      const first = await api.saveFile(getContent())
+      if (!first) return
+      const p = await api.getCurrentFilePath()
+      if (!p) return
+      currentFilePath = p
+    }
+    const content = await processContentForSave(getContent())
+    await api.saveFile(content)
+    needsSave = false
+    api.setDirty(false)
+    if (currentFilePath) {
+      api.cleanupOrphanImages(content, dirname(currentFilePath), mdBasename() + '-assets')
+    }
+    // Window will close via the main process timeout
+  })
+
+  // ─── Image Gallery wiring ───
+
+  api.onMenuToggleGallery(() => toggleGallery())
+
+  const closeBtn = document.getElementById('gallery-close')
+  if (closeBtn) closeBtn.addEventListener('click', () => { if (galleryVisible) toggleGallery() })
+
+  const backdrop = document.getElementById('gallery-backdrop')
+  if (backdrop) backdrop.addEventListener('click', () => { if (galleryVisible) toggleGallery() })
+
+  const searchInput = document.getElementById('gallery-search') as HTMLInputElement
+  if (searchInput) {
+    searchInput.addEventListener('input', () => filterGallery(searchInput.value))
+  }
+
+  // Keyboard: Esc to close gallery
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && galleryVisible) {
+      toggleGallery()
+      e.preventDefault()
+    }
+  })
+
+  // ─── Image paste handling ───
+  document.addEventListener('paste', async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
+        e.preventDefault()
+        const file = items[i].getAsFile()
+        if (!file) continue
+
+        const now = new Date()
+        const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
+        const extMap: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
+        const ext = extMap[file.type] || 'png'
+        const fileName = `${mdBasename()}-image-${ts}.${ext}`
+
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const dataUrl = reader.result as string
+          const base64 = dataUrl.split(',')[1]
+
+          if (currentFilePath) {
+            // Have a file path — save to assets/ immediately
+            try {
+              const fileDir = dirname(currentFilePath)
+              const relativePath = await api.saveImageFile({ base64Data: base64, fileName, fileDir, mdName: mdBasename() + '-assets' })
+              pendingImageMap.set(dataUrl, relativePath)
+            } catch (err) {
+              console.error('Failed to save pasted image:', err)
+            }
+          } else {
+            // Untitled — mark for deferred save (no file path yet)
+            pendingImageMap.set(dataUrl, null)
+          }
+
+          // Always insert data URL — it displays correctly regardless of file state
+          insertImageAtCursor(dataUrl)
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+  })
+
+  // ─── Modified drop: image files save to assets, md files open ───
   document.addEventListener('dragover', (e) => e.preventDefault())
   document.addEventListener('drop', async (e) => {
     e.preventDefault()
     const file = e.dataTransfer?.files[0]
     if (!file) return
+
+    // Image files: save to assets and insert
+    if (file.type.startsWith('image/')) {
+      const ext = file.name.split('.').pop() || 'png'
+      const now = new Date()
+      const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
+      const fileName = `${mdBasename()}-image-${ts}.${ext}`
+
+      // Read as data URL for guaranteed display
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(r.result as string)
+        r.onerror = reject
+        r.readAsDataURL(file)
+      })
+      const base64 = dataUrl.split(',')[1]
+
+      if (currentFilePath) {
+        try {
+          const fileDir = dirname(currentFilePath)
+          const relativePath = await api.saveImageFile({ base64Data: base64, fileName, fileDir, mdName: mdBasename() + '-assets' })
+          pendingImageMap.set(dataUrl, relativePath)
+        } catch (err) {
+          console.error('Failed to save dropped image:', err)
+        }
+      } else {
+        // Untitled — mark for deferred save
+        pendingImageMap.set(dataUrl, null)
+      }
+      insertImageAtCursor(dataUrl)
+      return
+    }
+
+    // .md files: open normally
     const filePath = api.getPathForFile(file)
     if (!filePath) return
     const result = await api.openFilePath(filePath)
-    if (result) setContent(result.content)
+    if (result) {
+      currentFilePath = result.path
+      setContent(result.content)
+    }
   })
 }
 

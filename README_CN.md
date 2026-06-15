@@ -1,13 +1,28 @@
-# ColaMD
+# ColaMD-Plus
 
-**Markdown as Database。Agent Native 的编辑器与模板渲染平台。**
+**基于 [ColaMD](https://github.com/marswaveai/colamd) 的增强版 — 增加了图片管理功能。**
 
-人类与 AI Agent 的实时协作 — Agent 的每一次修改，你都能即时看到。把任意 Markdown 文件渲染成幻灯片、博客、简历或产品页。
+保留原版所有功能，新增图片粘贴自动保存、图片画廊、关闭前保存提醒等。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub release](https://img.shields.io/github/release/marswaveai/colamd.svg)](https://github.com/marswaveai/colamd/releases)
 
-[下载](#下载) | [为什么做 ColaMD](#为什么做-colamd) | [功能](#功能) | [幻灯片](#幻灯片--markdown-as-database) | [开发](#开发) | [English](README.md)
+[下载](#下载) | [新增功能](#新增功能) | [为什么做 ColaMD](#为什么做-colamd) | [开发](#开发) | [English](README.md)
+
+---
+
+## 新增功能
+
+### 📸 图片粘贴自动保存
+截图后直接粘贴到编辑器，自动保存到 `{文件名}-assets/` 文件夹。从 Finder 拖拽图片也支持。
+
+### 🖼️ 图片画廊（⌘I）
+按 `Cmd+I` 打开浮层面板，浏览当前文档所有图片。支持缩略图预览、文件名搜索、点击跳转、右键在 Finder 中显示。
+
+### 🗑️ 自动清理
+删除文档中的图片引用后保存，`{文件名}-assets/` 里对应的图片文件会自动删除。
+
+### 💾 关闭前保存提醒
+关闭窗口或退出时如有未保存修改，弹窗询问保存、不保存或取消。
 
 ---
 
@@ -185,8 +200,11 @@ ColaMD 将随 Agent 生态一起演进：
 
 ## 开源协议
 
-[MIT](LICENSE) — 永久免费。
+[MIT](LICENSE)
+
+原始版权 (c) 2026 marswave.ai  
+修改版权 (c) 2026
 
 ---
 
-由 [marswave.ai](https://marswave.ai) 为 Agent Native 的未来而造。
+基于 [ColaMD](https://github.com/marswaveai/colamd) 修改。

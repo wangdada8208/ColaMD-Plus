@@ -13,6 +13,18 @@
   </div>
   <div id="editor"></div>
   <textarea id="source-editor" spellcheck="false"></textarea>
+  <div id="image-gallery" class="hidden">
+    <div id="gallery-backdrop"></div>
+    <div id="gallery-panel">
+      <div id="gallery-header">
+        <h3>Image Gallery</h3>
+        <input id="gallery-search" type="text" placeholder="Search images..." spellcheck="false">
+        <button id="gallery-close" title="Close (Esc)">&times;</button>
+      </div>
+      <div id="gallery-grid"></div>
+      <div id="gallery-empty" class="hidden">No images found in this document.</div>
+    </div>
+  </div>
   <script type="module" src="./main.ts"></script>
 </body>
 </html>

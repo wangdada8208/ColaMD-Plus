@@ -29,6 +29,16 @@ export interface ElectronAPI {
   exportSlides: (content: string) => Promise<boolean>
   onMenuExportSlides: (callback: () => void) => void
   onAgentActivity: (callback: (state: string) => void) => void
+  // Image Management
+  saveImageFile: (data: { base64Data: string; fileName: string; fileDir: string; mdName?: string }) => Promise<string>
+  scanDocumentImages: (filePath: string) => Promise<Array<{ alt: string; src: string; absPath: string; exists: boolean; fileName: string }>>
+  resolveImagePath: (relativePath: string, fileDir: string) => Promise<string>
+  revealInFinder: (absPath: string) => void
+  getCurrentFilePath: () => Promise<string | null>
+  cleanupOrphanImages: (content: string, fileDir: string, folderName: string) => Promise<void>
+  setDirty: (dirty: boolean) => void
+  onTriggerSave: (callback: () => void) => void
+  onMenuToggleGallery: (callback: () => void) => void
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -92,5 +102,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onAgentActivity: (callback: (state: string) => void) => {
     ipcRenderer.on('agent-activity', (_event, state) => callback(state))
+  },
+  // Image Management
+  saveImageFile: (data: { base64Data: string; fileName: string; fileDir: string }) =>
+    ipcRenderer.invoke('save-image-file', data),
+  scanDocumentImages: (filePath: string) =>
+    ipcRenderer.invoke('scan-document-images', filePath),
+  resolveImagePath: (relativePath: string, fileDir: string) =>
+    ipcRenderer.invoke('resolve-image-path', relativePath, fileDir),
+  revealInFinder: (absPath: string) =>
+    ipcRenderer.invoke('reveal-in-finder', absPath),
+  getCurrentFilePath: () =>
+    ipcRenderer.invoke('get-current-file-path'),
+  cleanupOrphanImages: (content: string, fileDir: string, folderName: string) =>
+    ipcRenderer.invoke('cleanup-orphan-images', content, fileDir, folderName),
+  setDirty: (dirty: boolean) => ipcRenderer.send('set-dirty', dirty),
+  onTriggerSave: (callback: () => void) => {
+    ipcRenderer.on('trigger-save', () => callback())
+  },
+  onMenuToggleGallery: (callback: () => void) => {
+    ipcRenderer.on('menu-toggle-gallery', () => callback())
   }
 } satisfies ElectronAPI)

@@ -1,5 +1,6 @@
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx, serializerCtx, remarkPluginsCtx } from '@milkdown/kit/core'
-import { DOMSerializer } from '@milkdown/kit/prose/model'
+import { DOMSerializer, DOMParser } from '@milkdown/kit/prose/model'
+import { TextSelection } from '@milkdown/kit/prose/state'
 import remarkBreaks from 'remark-breaks'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
@@ -130,4 +131,58 @@ export function getHTML(): string {
 export function setMarkdown(content: string): void {
   if (!editorInstance) return
   editorInstance.action(replaceAll(content))
+}
+
+export function insertImageAtCursor(src: string): void {
+  // Use the markdown parser pipeline to insert the image,
+  // matching how resolveImagePaths works for loaded files.
+  if (!editorInstance) return
+
+  // Insert a marker at cursor position
+  const marker = `%%IMG:${Date.now()}%%`
+  editorInstance.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
+    const { state, dispatch } = view
+    const tr = state.tr.insertText(marker, state.selection.from)
+    dispatch(tr)
+  })
+
+  // Get the full markdown and replace marker with image syntax
+  let content = ''
+  editorInstance.action((ctx) => {
+    const serializer = ctx.get(serializerCtx)
+    const view = ctx.get(editorViewCtx)
+    content = serializer(view.state.doc)
+  })
+
+  content = content.replace(marker, `![image](${src})`)
+
+  // Replace all — goes through the Milkdown parser which handles file:// URLs
+  editorInstance.action(replaceAll(content))
+}
+
+export function findImageInDoc(src: string): void {
+  if (!editorInstance) return
+  editorInstance.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
+    const { state, dispatch } = view
+    const doc = state.doc
+    let foundPos: number | null = null
+
+    doc.descendants((node, pos) => {
+      if (foundPos !== null) return false
+      if (node.type.name === 'image' && node.attrs.src === src) {
+        foundPos = pos
+        return false
+      }
+      return true
+    })
+
+    if (foundPos !== null) {
+      const $pos = state.doc.resolve(foundPos)
+      const tr = state.tr.setSelection(new TextSelection($pos, state.doc.resolve(foundPos + 1)))
+      dispatch(tr.scrollIntoView())
+      view.focus()
+    }
+  })
 }

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
 import { join, basename, dirname, extname } from 'path'
-import { readFile, writeFile, readdir, copyFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, readdir, copyFile, mkdir, unlink } from 'fs/promises'
 import { watch, FSWatcher, existsSync, readdirSync, readFileSync, createServer } from 'fs'
 import { IncomingMessage, ServerResponse } from 'http'
 import { createServer as createHttpServer } from 'http'
@@ -32,6 +32,7 @@ interface WindowState {
   agentState: 'idle' | 'active' | 'cooldown'
   lastExternalChange: number
   agentCooldownTimer: ReturnType<typeof setTimeout> | null
+  isDirty: boolean
 }
 
 const windowStates = new Map<number, WindowState>()
@@ -40,7 +41,7 @@ let pendingFilePaths: string[] = []
 function getState(win: BrowserWindow): WindowState {
   let state = windowStates.get(win.id)
   if (!state) {
-    state = { filePath: null, watcher: null, isInternalSave: false, debounceTimer: null, agentState: 'idle', lastExternalChange: 0, agentCooldownTimer: null }
+    state = { filePath: null, watcher: null, isInternalSave: false, debounceTimer: null, agentState: 'idle', lastExternalChange: 0, agentCooldownTimer: null, isDirty: false }
     windowStates.set(win.id, state)
   }
   return state
@@ -77,6 +78,33 @@ function createWindow(filePath?: string): BrowserWindow {
   win.webContents.on('did-finish-load', () => {
     if (filePath) {
       loadFileInWindow(win, filePath)
+    }
+  })
+
+  win.on('close', async (e) => {
+    if (state.filePath && state.isDirty) {
+      e.preventDefault()
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: ['Save', "Don't Save", 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+        message: 'Do you want to save the changes?',
+        detail: `"${basename(state.filePath)}" has unsaved changes.`
+      })
+      if (response === 0) {
+        // Save and close
+        state.isDirty = false
+        win.webContents.send('trigger-save')
+        setTimeout(() => {
+          if (!win.isDestroyed()) win.close()
+        }, 300)
+      } else if (response === 1) {
+        // Don't Save — close without saving
+        state.isDirty = false
+        win.close()
+      }
+      // response === 2 (Cancel) — do nothing
     }
   })
 
@@ -191,7 +219,9 @@ function loadFileInWindow(win: BrowserWindow, filePath: string): void {
       updateTitle(win)
       win.webContents.send('file-opened', { path: filePath, content: resolveImagePaths(data, filePath) })
     })
-    .catch(() => {})
+    .catch((err) => {
+      console.error('Failed to load file:', filePath, err)
+    })
 }
 
 // Find window that already has this file open
@@ -646,6 +676,106 @@ ipcMain.handle('load-theme-css', async (_event, fileName: string) => {
   }
 })
 
+// ─── Image Management ──────────────────────────────────────────────────────────
+
+interface ImageInfo {
+  alt: string
+  src: string
+  absPath: string
+  exists: boolean
+  fileName: string
+}
+
+ipcMain.handle('save-image-file', async (event, data: { base64Data: string; fileName: string; fileDir: string; mdName?: string }) => {
+  const folderName = data.mdName || 'assets'
+  const assetsDir = join(data.fileDir, folderName)
+  await mkdir(assetsDir, { recursive: true })
+  const buffer = Buffer.from(data.base64Data, 'base64')
+  // Deduplicate: if file exists, append number
+  let finalName = data.fileName
+  const ext = extname(finalName)
+  const base = basename(finalName, ext)
+  let counter = 1
+  while (existsSync(join(assetsDir, finalName))) {
+    finalName = `${base}-${counter}${ext}`
+    counter++
+  }
+  await writeFile(join(assetsDir, finalName), buffer)
+  return `${folderName}/${finalName}`
+})
+
+ipcMain.handle('scan-document-images', async (event, filePath: string): Promise<ImageInfo[]> => {
+  const fileDir = dirname(filePath)
+  try {
+    const content = await readFile(filePath, 'utf-8')
+    const images: ImageInfo[] = []
+    const regex = /!\[([^\]]*)\]\(([^)]+)\)/g
+    let match
+    while ((match = regex.exec(content)) !== null) {
+      const src = match[2].trim()
+      if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:') || src.startsWith('file://')) continue
+      const absPath = join(fileDir, src)
+      images.push({
+        alt: match[1] || '',
+        src,
+        absPath,
+        exists: existsSync(absPath),
+        fileName: basename(src)
+      })
+    }
+    return images
+  } catch {
+    return []
+  }
+})
+
+ipcMain.handle('resolve-image-path', async (_event, relativePath: string, fileDir: string): Promise<string> => {
+  return join(fileDir, relativePath)
+})
+
+ipcMain.handle('reveal-in-finder', async (_event, absPath: string) => {
+  shell.showItemInFolder(absPath)
+})
+
+ipcMain.handle('get-current-file-path', (event) => {
+  const win = getWinFromEvent(event)
+  if (!win) return null
+  return getState(win).filePath
+})
+
+ipcMain.on('set-dirty', (event, dirty: boolean) => {
+  const win = getWinFromEvent(event)
+  if (win) getState(win).isDirty = dirty
+})
+
+ipcMain.handle('cleanup-orphan-images', async (_event, content: string, fileDir: string, folderName: string) => {
+  // Extract all local image references from markdown content
+  const referencedFiles = new Set<string>()
+  const regex = /!\[([^\]]*)\]\(([^)]+)\)/g
+  let match
+  while ((match = regex.exec(content)) !== null) {
+    const src = match[2].trim()
+    if (!src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:') && !src.startsWith('file://')) {
+      referencedFiles.add(basename(src))
+    }
+  }
+
+  // List files in the assets folder and delete unreferenced ones
+  const assetsDir = join(fileDir, folderName)
+  try {
+    const files = await readdir(assetsDir)
+    for (const file of files) {
+      if (!referencedFiles.has(file)) {
+        try {
+          await unlink(join(assetsDir, file))
+        } catch { /* ignore */ }
+      }
+    }
+  } catch {
+    // assets dir doesn't exist — nothing to clean
+  }
+})
+
 // Menu — targets the focused window
 
 function getFocusedWindow(): BrowserWindow | null {
@@ -751,6 +881,12 @@ function buildMenu(): void {
           label: 'Open as Slides',
           accelerator: 'CmdOrCtrl+Shift+P',
           click: () => sendToFocused('menu-open-as-slides')
+        },
+        { type: 'separator' },
+        {
+          label: 'Image Gallery',
+          accelerator: 'CmdOrCtrl+I',
+          click: () => sendToFocused('menu-toggle-gallery')
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
